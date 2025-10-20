@@ -1,0 +1,7 @@
+resocks
+Vagrantfile
+.DS_Store
+.vagrant
+.idea/
+vendor/
+bin/
