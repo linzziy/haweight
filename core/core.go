@@ -6,6 +6,7 @@ import (
 	"github.com/gookit/goutil/netutil/httpreq"
 	"github.com/gookit/goutil/strutil"
 	"io"
+	"math"
 	"strings"
 )
 
@@ -103,15 +104,20 @@ func GetStats() (map[string]ServerStat, error) {
 
 	result := make(map[string]ServerStat)
 	for _, stat := range stats {
-		total := Reduce(stat, 0.0, func(acc int, s ServerStat) int {
-			return acc + s.ChkFail
+		var rawWeights []float64
+		chkCount := 0
+		totalRaw := Reduce(stat, 0.0, func(acc float64, s ServerStat) float64 {
+			chkCount += s.ChkFail
+			raw := 1.0 / float64(s.ChkFail+1)
+			rawWeights = append(rawWeights, raw)
+			return acc + raw
 		})
 
 		for i := range stat {
-			if total <= 1 { //全部都正常
+			if chkCount <= 1 { //全部都正常
 				stat[i].Weight = 100
 			} else {
-				stat[i].Weight = int(100 - float64(stat[i].ChkFail)/float64(total)*100)
+				stat[i].Weight = int(math.Round((rawWeights[i] / totalRaw) * 100)) //int(100 - float64(stat[i].ChkFail)/float64(total)*100)
 			}
 
 			result[stat[i].SVName] = stat[i]
