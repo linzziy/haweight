@@ -8,7 +8,7 @@ GOBUILD=CGO_ENABLED=0 go build -ldflags '-X main.defaultConnectionKey=L+aPA2rX7l
 all: linux-amd64 linux-arm64 macos-amd64 macos-arm64 win64 win32
 
 linux-amd64:
-	GOARCH=amd64 GOOS=linux $(GOBUILD) -o $(BINDIR)/$(NAME)-$@ main.go && upx bin/ha-linux-amd64
+	rm -f bin/haweight && GOARCH=amd64 GOOS=linux $(GOBUILD) -o $(BINDIR)/$(NAME)-$@ main.go && upx bin/ha-linux-amd64 && mv bin/ha-linux-amd64 bin/haweight
 
 macos-arm64:
 	GOARCH=arm64 GOOS=darwin $(GOBUILD) -o $(BINDIR)/$(NAME)-$@ main.go

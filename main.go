@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+var currentTime time.Time
 var haStats map[string]core.ServerStat
 
 func agentServer(port string) {
@@ -54,12 +55,14 @@ func handle(conn net.Conn) {
 
 	result := fmt.Sprintf("%d%%\n", threshold)
 	conn.Write([]byte(result))
-	//log.Println(fmt.Sprintf("svname:%s-->%s", svname, result))
+	log.Println(fmt.Sprintf("svname:%s-->%s", svname, result))
 }
 
 func main() {
+	resetTicker := time.NewTicker(5 * time.Hour)
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+	defer resetTicker.Stop()
 
 	haStats = make(map[string]core.ServerStat)
 	// 每隔一段时间来进行计算权重，后续使用agent-check
@@ -68,10 +71,26 @@ func main() {
 		haStats, err = core.GetStats()
 		for {
 			<-ticker.C
-			haStats, err = core.GetStats()
-			if err != nil {
-				log.Println(err)
+			if haStats == nil || len(haStats) <= 0 || currentTime.IsZero() || time.Now().After(currentTime.Add(15*time.Minute)) {
+				haStats, err = core.GetStats()
+				if !currentTime.IsZero() {
+					currentTime = time.Time{}
+				}
+				println("---------------")
+				if err != nil {
+					log.Println(err)
+				}
 			}
+		}
+	}()
+
+	//每隔一段时间来进行重置权重，网络情况是一直变化的，保持变化
+	go func() {
+		for {
+			<-resetTicker.C
+			core.ResetCountersAll()
+			//重置的时候记录一下时间，在重置后15分钟以内不进行收集数据，分配权限
+			currentTime = time.Now()
 		}
 	}()
 

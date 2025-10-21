@@ -1,13 +1,17 @@
 package core
 
 import (
+	"bufio"
 	"encoding/csv"
 	"fmt"
 	"github.com/gookit/goutil/netutil/httpreq"
 	"github.com/gookit/goutil/strutil"
 	"io"
+	"log"
 	"math"
+	"net"
 	"strings"
+	"time"
 )
 
 // ServerStat 表示一个服务器的统计信息（简化版）
@@ -17,6 +21,8 @@ type ServerStat struct {
 	Status  string // UP/DOWN
 	Weight  int    // 当前权重
 	ChkFail int    //检测失败次数，进行自动调整权重
+	WRedis  int    //检测失败次数，进行自动调整权重
+	WRetr   int    //检测失败次数，进行自动调整权重
 }
 
 // getFieldIndex 从表头获取字段索引
@@ -43,6 +49,44 @@ func Reduce[T any, R any](items []T, init R, f func(R, T) R) R {
 		acc = f(acc, item)
 	}
 	return acc
+}
+
+// sendHaproxyCommand 发送命令到 HAProxy TCP socket 并返回响应
+func SendHaproxyCommand(command string) (string, error) {
+	host := "192.168.5.2"
+	port := "9999"
+	// 建立 TCP 连接（超时 5s）
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("连接失败: %v", err)
+	}
+	defer conn.Close() // 确保断开
+
+	// 发送命令（以 \n 结束）
+	fullCmd := command + "\n"
+	_, err = conn.Write([]byte(fullCmd))
+	if err != nil {
+		return "", fmt.Errorf("发送命令失败: %v", err)
+	}
+
+	// 读取响应（用 bufio 读取一行）
+	reader := bufio.NewReader(conn)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %v", err)
+	}
+
+	return strings.TrimSpace(response), nil // 去除 \n 等空白
+}
+
+func ResetCountersAll() {
+	command := "clear counters all"
+	result, err := SendHaproxyCommand(command)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(fmt.Sprintf("操作成功[%s]%s", command, result))
 }
 
 func GetStats() (map[string]ServerStat, error) {
@@ -76,6 +120,8 @@ func GetStats() (map[string]ServerStat, error) {
 	statusIdx := getFieldIndex(header, "status")
 	weightIdx := getFieldIndex(header, "weight")
 	chkFailIdx := getFieldIndex(header, "chkfail")
+	wredisIdx := getFieldIndex(header, "wredis")
+	wretrIdx := getFieldIndex(header, "wretr")
 
 	// 解析数据行
 	stats := make(map[string][]ServerStat)
@@ -95,6 +141,8 @@ func GetStats() (map[string]ServerStat, error) {
 			Status:  getField(row, statusIdx),
 			Weight:  strutil.IntOr(getField(row, weightIdx), 50),
 			ChkFail: strutil.IntOr(getField(row, chkFailIdx), 0),
+			WRedis:  strutil.IntOr(getField(row, wredisIdx), 0),
+			WRetr:   strutil.IntOr(getField(row, wretrIdx), 0),
 		}
 		if _, ok := stats[pxName]; !ok {
 			stats[pxName] = []ServerStat{}
@@ -107,17 +155,26 @@ func GetStats() (map[string]ServerStat, error) {
 		var rawWeights []float64
 		chkCount := 0
 		totalRaw := Reduce(stat, 0.0, func(acc float64, s ServerStat) float64 {
-			chkCount += s.ChkFail
-			raw := 1.0 / float64(s.ChkFail+1)
+			if s.Status != "UP" {
+				rawWeights = append(rawWeights, 0)
+				return acc
+			}
+			w := s.WRedis + s.WRetr
+			chkCount += w
+			raw := 1.0 / float64(w+1)
 			rawWeights = append(rawWeights, raw)
 			return acc + raw
 		})
 
 		for i := range stat {
-			if chkCount <= 1 { //全部都正常
+			if chkCount <= 1 || totalRaw <= 0 { //全部都正常
 				stat[i].Weight = 100
 			} else {
-				stat[i].Weight = int(math.Round((rawWeights[i] / totalRaw) * 100)) //int(100 - float64(stat[i].ChkFail)/float64(total)*100)
+				if stat[i].Status == "UP" {
+					stat[i].Weight = int(math.Round((rawWeights[i] / totalRaw) * 100)) //int(100 - float64(stat[i].ChkFail)/float64(total)*100)
+				} else {
+					stat[i].Weight = 0 //无效服务器，不需要任何权重
+				}
 			}
 
 			result[stat[i].SVName] = stat[i]
