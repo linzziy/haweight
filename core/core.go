@@ -16,14 +16,15 @@ import (
 
 // ServerStat 表示一个服务器的统计信息（简化版）
 type ServerStat struct {
-	PXName  string // Proxy name
-	SVName  string // Server name
-	Status  string // UP/DOWN
-	Weight  int    // 当前权重
-	ChkFail int    //检测失败次数，进行自动调整权重
-	WRedis  int    //失败，切换次数
-	WRetr   int    //失败，重试次数
-	EResp   int    //返回失败，如果失败3次，可以当作代理失败
+	PXName   string // Proxy name
+	SVName   string // Server name
+	Status   string // UP/DOWN
+	Weight   int    // 当前权重
+	ChkFail  int    //检测失败次数，进行自动调整权重
+	WRedis   int    //失败，切换次数
+	WRetr    int    //失败，重试次数
+	EResp    int    //返回失败，如果失败3次，可以当作代理失败
+	Downtime int    //失败时间，超过10分钟，大概率不能用了
 }
 
 // getFieldIndex 从表头获取字段索引
@@ -124,6 +125,7 @@ func GetStats() (map[string]ServerStat, error) {
 	wredisIdx := getFieldIndex(header, "wredis")
 	wretrIdx := getFieldIndex(header, "wretr")
 	erespIdx := getFieldIndex(header, "eresp")
+	downtimeIdx := getFieldIndex(header, "downtime")
 
 	// 解析数据行
 	stats := make(map[string][]ServerStat)
@@ -138,14 +140,15 @@ func GetStats() (map[string]ServerStat, error) {
 			continue //跳过前后面数据
 		}
 		stat := ServerStat{
-			PXName:  pxName,
-			SVName:  svName,
-			Status:  getField(row, statusIdx),
-			Weight:  strutil.IntOr(getField(row, weightIdx), 50),
-			ChkFail: strutil.IntOr(getField(row, chkFailIdx), 0),
-			WRedis:  strutil.IntOr(getField(row, wredisIdx), 0),
-			WRetr:   strutil.IntOr(getField(row, wretrIdx), 0),
-			EResp:   strutil.IntOr(getField(row, erespIdx), 0),
+			PXName:   pxName,
+			SVName:   svName,
+			Status:   getField(row, statusIdx),
+			Weight:   strutil.IntOr(getField(row, weightIdx), 50),
+			ChkFail:  strutil.IntOr(getField(row, chkFailIdx), 0),
+			WRedis:   strutil.IntOr(getField(row, wredisIdx), 0),
+			WRetr:    strutil.IntOr(getField(row, wretrIdx), 0),
+			EResp:    strutil.IntOr(getField(row, erespIdx), 0),
+			Downtime: strutil.IntOr(getField(row, downtimeIdx), 0),
 		}
 		if _, ok := stats[pxName]; !ok {
 			stats[pxName] = []ServerStat{}

@@ -49,13 +49,31 @@ func handle(conn net.Conn) {
 	}
 
 	threshold := 100
+	cmd := ""
 	if stat, ok := haStats[svname]; ok {
 		threshold = stat.Weight
+		if stat.Status == "DOWN" && int(stat.Downtime/60) > 10 { //超过了10分钟，即服务器可能已经变化
+			now := time.Now()
+
+			// 构造当天的 00:00 和 00:10 时间
+			start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+			end := time.Date(now.Year(), now.Month(), now.Day(), 0, 10, 0, 0, now.Location())
+
+			if now.After(start) && now.Before(end) {
+				cmd = "ready" //每天的这个时间段开放，服务器可能已经开启
+				fmt.Println("当前时间在 00:00 到 00:10 之间")
+			} else {
+				cmd = "maint"
+				fmt.Println("当前时间不在 00:00 到 00:10 之间")
+			}
+		}
 	}
 
-	result := fmt.Sprintf("%d%%\n", threshold)
-	conn.Write([]byte(result))
-	log.Println(fmt.Sprintf("svname:%s-->%s", svname, result))
+	if cmd == "" {
+		cmd = fmt.Sprintf("%d%%", threshold)
+	}
+	conn.Write([]byte(cmd + "\n"))
+	log.Println(fmt.Sprintf("svname:%s-->%s", svname, cmd))
 }
 
 func main() {
